@@ -16,7 +16,7 @@ Session and Weekly usage is shared between your sessions: whichever session last
 
 - Links to every artifact Claude has published in the session, on the left, or "No Artifacts" if there are none yet.
 - The names of the files Claude is editing during the current turn, shimmering, on the right, or "No Active Files" when nothing is being edited.
-- Two icon buttons at the far right: **⊟** runs `/compact` and **🗑** runs `/clear`. The clear button wipes the conversation right away, with no confirmation.
+- Two icon buttons at the far right: **⊟** runs `/compact` and **🗑** runs `/clear` after you confirm it in a dialog ("Keep it" or "Clear conversation"); closing the dialog keeps the conversation.
 
 <img width="1396" height="264" alt="image" src="https://github.com/user-attachments/assets/25658535-4e1c-4c77-953d-775e5fa95c75" />
 

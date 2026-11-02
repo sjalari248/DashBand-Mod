@@ -100,7 +100,7 @@ test('the bars keep round caps with room for them at both ends', async ($, on) =
   await ui.unmount()
 })
 
-test('compact and clear sit on the second row only, and run their commands', async ($, on) => {
+test('compact and clear sit on the second row only, and clear asks first', async ($, on) => {
   const now = Date.parse('2026-11-01T12:00:00Z')
   const ran: string[] = []
   on('clock.now', () => ({ value: now }))
@@ -109,10 +109,21 @@ test('compact and clear sit on the second row only, and run their commands', asy
     value: { startedAt: now, context: { tokens: 50_000, window: 1_000_000, percent: 5 }, rateLimits: [] },
   }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
-  on('tool.call', () => ({ result: {} }))
   on('command.run', (_, e) => {
     ran.push(e.command)
     return { text: '' }
+  })
+  // The confirmation is the app's question dialog (an AskUserQuestion call);
+  // its answers, in order, null standing for closing the dialog.
+  const answers: (string | null)[] = []
+  const asked: { question: string; options: string[] }[] = []
+  on('tool.call', (_, e) => {
+    if (e.tool !== 'AskUserQuestion') return { result: {} }
+    const q = (e as unknown as { questions: { question: string; options: { label: string }[] }[] }).questions[0]!
+    asked.push({ question: q.question, options: q.options.map(o => o.label) })
+    const answer = answers.shift()
+    if (answer === null || answer === undefined) throw new Error('dismissed')
+    return { result: { questions: [q], answers: { [q.question]: answer } } }
   })
 
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
@@ -124,11 +135,20 @@ test('compact and clear sit on the second row only, and run their commands', asy
   await $.tool.call({ tool: 'Write', file_path: 'C:/proj/notes.md', content: 'x' })
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'session-band', component: 'AbovePrompt', surface, props: workingBand })
+    answers.push('Keep it', null, 'Clear conversation')
     await ui.press({ key: 'compact' })
+    await ui.press({ key: 'clear' })
+    await ui.press({ key: 'clear' })
     await ui.press({ key: 'clear' })
     await ui.unmount()
   }
+  // Each surface: compact at once; clear only on the third press, the one answered yes.
   expect(ran).toEqual(['compact', 'clear', 'compact', 'clear'])
+  expect(asked).toHaveLength(6)
+  expect(asked[0]).toEqual({
+    question: 'Clear this conversation and start a new one?',
+    options: ['Keep it', 'Clear conversation'],
+  })
 })
 
 test('each side of the second line has a placeholder when it is empty', async ($, on) => {

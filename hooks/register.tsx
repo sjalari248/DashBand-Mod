@@ -19,6 +19,9 @@ const BAR_INSET = 5
 // The widest the meters run, in cells; past it the band pads both sides equally.
 const MAX_COLUMNS = 150
 const MAX_FILES = 3
+const CLEAR_QUESTION = 'Clear this conversation and start a new one?'
+const CLEAR_YES = 'Clear conversation'
+const CLEAR_NO = 'Keep it'
 // The tools that change a file: only files Claude is editing are shown.
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 
@@ -268,6 +271,17 @@ export const register: Register = on => {
       $.command.run({ command }).catch(() => $.ui.toast(`Could not run /${command}`))
     }
 
+    // /clear cannot be undone, so the trash icon asks first, in the app's own
+    // question dialog. Only an explicit "Clear conversation" clears: "Keep it"
+    // comes first so no default lands on clearing, and closing the dialog,
+    // typed text or any other answer counts as no.
+    const confirmClear = async () => {
+      const answer = await $.ui
+        .ask(CLEAR_QUESTION, { options: [CLEAR_NO, CLEAR_YES], header: 'Clear' })
+        .catch(() => CLEAR_NO)
+      if (answer === CLEAR_YES) run('clear')()
+    }
+
     // The band's own frame leaves a margin each side; xs adds half as much
     // again, so "Session" and the context figure sit 50% further from its
     // edges. On a very wide band the meters stop at MAX_COLUMNS, centred.
@@ -322,7 +336,7 @@ export const register: Register = on => {
 
             <Box flexShrink={0} flexDirection="row" alignItems="center" gap="xs">
               <Button key="compact" label="⊟" plain dimColor onPress={run('compact')} />
-              <Button key="clear" label={'\u{1F5D1}\u{FE0E}'} plain dimColor onPress={run('clear')} />
+              <Button key="clear" label={'\u{1F5D1}\u{FE0E}'} plain dimColor onPress={confirmClear} />
             </Box>
           </Box>
         ) : null}
