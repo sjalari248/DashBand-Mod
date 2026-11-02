@@ -177,3 +177,77 @@ test('each side of the second line has a placeholder when it is empty', async ($
   expect(await ui.find({ type: 'Button', key: 'clear' })).toBeDefined()
   await ui.unmount()
 })
+
+test('the newest usage reading from any session is drawn, and a reset window reads 0%', async ($, on) => {
+  const now = Date.parse('2026-11-01T12:00:00Z')
+  const files = new Map<string, string>()
+  // The engine hands fs hooks absolute paths in the platform's own spelling.
+  const norm = (p: string) => p.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '')
+  on('clock.now', () => ({ value: now }))
+  on('clock.every', () => ({ value: undefined }))
+  on('env.get', (_, e) => ({ value: e.name === 'HOME' ? '/home/me' : undefined }))
+  on('fs.read', (_, e) => {
+    const text = files.get(norm(e.path))
+    if (text === undefined) throw new Error('missing')
+    return { value: text }
+  })
+  on('fs.write', (_, e) => {
+    files.set(norm(e.path), e.text)
+    return { value: undefined }
+  })
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  // This session last heard 10% / 20%; another session has since heard more.
+  on('session.usage', () => ({
+    value: {
+      startedAt: now,
+      context: { tokens: 50_000, window: 1_000_000, percent: 5 },
+      rateLimits: [
+        { kind: 'five_hour', percentUsed: 10, resetsAt: '2026-11-01T14:00:00Z' },
+        { kind: 'seven_day', percentUsed: 20, resetsAt: '2026-11-05T12:00:00Z' },
+      ],
+    },
+  }))
+  const path = '/home/me/.claude/session-band/usage.json'
+  files.set(
+    path,
+    JSON.stringify({
+      at: now - 60_000,
+      rateLimits: [
+        { kind: 'five_hour', percentUsed: 47, resetsAt: '2026-11-01T14:00:00Z' },
+        { kind: 'seven_day', percentUsed: 33, resetsAt: '2026-11-05T12:00:00Z' },
+      ],
+    }),
+  )
+
+  const props = { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120, scroll: { offset: 0, bodyRows: 10 }, view: {} }
+  let ui = await $.ui.mount({ plugin: 'session-band', component: 'AbovePrompt', surface: 'desktop', props })
+  expect((await ui.find({ type: 'Text', text: /^47%$/ }))?.text).toBe('47%')
+  expect((await ui.find({ type: 'Text', text: /^33%$/ }))?.text).toBe('33%')
+  expect(await ui.find({ type: 'Text', text: /^10%$/ })).toBeUndefined()
+  await ui.unmount()
+
+  // A newer reading this session hears is written for the others; an older one is not.
+  await $.session.measure({
+    context: { window: 1_000_000 },
+    rateLimits: [{ kind: 'five_hour', percentUsed: 50, resetsAt: '2026-11-01T14:00:00Z' }],
+    changed: ['rateLimits'],
+  })
+  expect(JSON.parse(files.get(path) ?? '{}').at).toBe(now)
+
+  // The five-hour window's reset has passed: it reads 0% with no countdown.
+  files.set(
+    path,
+    JSON.stringify({
+      at: now,
+      rateLimits: [
+        { kind: 'five_hour', percentUsed: 92, resetsAt: '2026-11-01T11:00:00Z' },
+        { kind: 'seven_day', percentUsed: 33, resetsAt: '2026-11-05T12:00:00Z' },
+      ],
+    }),
+  )
+  ui = await $.ui.mount({ plugin: 'session-band', component: 'AbovePrompt', surface: 'desktop', props })
+  expect((await ui.find({ type: 'Text', text: /^0%$/ }))?.text).toBe('0%')
+  expect(await ui.find({ type: 'Text', text: /^92%$/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /now/ })).toBeUndefined()
+  await ui.unmount()
+})

@@ -10,6 +10,8 @@ A Claude Code mod that adds a slim band right above the prompt box, styled to bl
 
 Every figure comes from Claude Code's live readings, so the bars stay accurate if usage limits or context sizes change.
 
+Session and Weekly usage is shared between your sessions: whichever session last heard back from Claude saves its reading, and every open session shows the newest one within about 30 seconds, without you sending a message. When a usage window resets, its bar drops to 0% straight away. The reading is kept in `~/.claude/session-band/usage.json`.
+
 **Second line, only when Claude has published an artifact in the session or is editing files right now:**
 
 - Links to every artifact Claude has published in the session, on the left, or "No Artifacts" if there are none yet.

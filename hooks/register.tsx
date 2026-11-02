@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { ElementTable, Register, SessionRateLimit } from 'claude-code'
+import type { ElementTable, EngineInterface, Register, SessionRateLimit } from 'claude-code'
 
 import type { ArtifactLink } from '../types'
 
@@ -50,6 +50,50 @@ const barSvg = (percent: number | undefined, fill: string) => {
   )
 }
 
+// The usage windows are the account's, not one session's, but each session
+// only hears of them in its own replies. Every session writes the reading it
+// last heard, with when it heard it, to one file in the user's Claude folder,
+// and every session draws whichever reading is newest: switching sessions
+// shows the latest figures without sending a message.
+type Reading = { at: number; rateLimits: SessionRateLimit[] }
+
+const readingPath = async ($: EngineInterface) => {
+  const dir =
+    (await $.env.get('CLAUDE_CONFIG_DIR')) ??
+    `${(await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE')) ?? '.'}/.claude`
+  return `${dir.replace(/[\\/]+$/, '')}/session-band/usage.json`
+}
+
+const isLimit = (l: unknown): l is SessionRateLimit =>
+  typeof l === 'object' &&
+  l !== null &&
+  typeof (l as SessionRateLimit).kind === 'string' &&
+  typeof (l as SessionRateLimit).percentUsed === 'number'
+
+const loadReading = async ($: EngineInterface): Promise<Reading | undefined> => {
+  try {
+    const raw = JSON.parse(String(await $.fs.read(await readingPath($)))) as Partial<Reading>
+    if (typeof raw.at !== 'number' || !Array.isArray(raw.rateLimits)) return undefined
+    return { at: raw.at, rateLimits: raw.rateLimits.filter(isLimit) }
+  } catch {
+    return undefined
+  }
+}
+
+const saveReading = async ($: EngineInterface, reading: Reading) => {
+  try {
+    const saved = await loadReading($)
+    if (saved && saved.at >= reading.at) return
+    await $.fs.write(await readingPath($), JSON.stringify(reading))
+  } catch {
+    // Sharing is a nicety: the session's own figures still draw.
+  }
+}
+
+// A window whose reset time has passed has started over: nothing used yet.
+const current = (limit: SessionRateLimit | undefined, now: number) =>
+  limit?.resetsAt && Date.parse(limit.resetsAt) <= now ? { ...limit, percentUsed: 0, resetsAt: undefined } : limit
+
 const countdown = (resetsAt: string | undefined, now: number) => {
   if (!resetsAt) return undefined
   const ms = Date.parse(resetsAt) - now
@@ -98,10 +142,13 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('session.measure', ($, e, next) => {
+  on('session.measure', async ($, e, next) => {
+    if (e.rateLimits.length > 0) {
+      await saveReading($, { at: await $.clock.now(), rateLimits: [...e.rateLimits] })
+    }
     $.ui.invalidate('ui.render')
     return next(e)
-  })
+  }).catch(($, e, next) => next(e))
 
   on('prompt.submit', async ($, e, next) => {
     await update($, files, () => [])
@@ -157,14 +204,20 @@ export const register: Register = on => {
     const { Box, Text, Button } = $.ui.resolve(e)
     const { Svg, Link, Client } = $.ui.resolve(e) as Partial<ElementTable<'desktop'>>
 
-    const [usage, now, made, touched] = await Promise.all([
+    const [usage, now, made, touched, shared] = await Promise.all([
       $.session.usage(),
       $.clock.now(),
       read($, artifacts),
       read($, files),
+      loadReading($),
     ])
 
-    const { session, weekly } = pickWindows(usage.rateLimits, now)
+    // The shared reading is at least as new as this session's own whenever
+    // it exists, since every session writes there as soon as it hears one.
+    const limits = shared && shared.rateLimits.length > 0 ? shared.rateLimits : usage.rateLimits
+    const picked = pickWindows(limits, now)
+    const session = current(picked.session, now)
+    const weekly = current(picked.weekly, now)
     const ctx = usage.context
     // The engine's figure where it gave one, else the same ratio from its counts.
     const ctxPercent =
