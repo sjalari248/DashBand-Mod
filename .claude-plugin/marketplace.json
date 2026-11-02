@@ -1,0 +1,11 @@
+{
+  "name": "dashband-mod",
+  "owner": { "name": "sjalari248" },
+  "plugins": [
+    {
+      "name": "session-band",
+      "source": "./",
+      "description": "Usage, context, artifacts and active files in a band above the Claude Code prompt."
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "session-band",
+  "version": "0.1.0",
+  "description": "A band above the prompt: session, weekly and context usage bars, this session's artifacts, and the files Claude is working in.",
+  "types": "./types/index.d.ts"
+}
