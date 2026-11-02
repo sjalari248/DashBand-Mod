@@ -16,6 +16,8 @@ Every figure comes from Claude Code's live readings, so the bars stay accurate i
 - The names of the files Claude is editing during the current turn, shimmering, on the right, or "No Active Files" when nothing is being edited.
 - Two icon buttons at the far right: **⊟** runs `/compact` and **🗑** runs `/clear`. The clear button wipes the conversation right away, with no confirmation.
 
+<img width="1396" height="264" alt="image" src="https://github.com/user-attachments/assets/25658535-4e1c-4c77-953d-775e5fa95c75" />
+
 ## Install
 
 At the prompt of a terminal Claude Code session:
