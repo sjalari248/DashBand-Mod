@@ -36,7 +36,7 @@ test('the band shows usage, artifacts and files on every surface', async ($, on)
   )
 
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
-  await $.tool.call({ tool: 'Read', file_path: 'C:/proj/src/register.tsx' })
+  await $.tool.call({ tool: 'Edit', file_path: 'C:/proj/src/register.tsx', old_string: 'a', new_string: 'b' })
   await $.tool.call({ tool: 'Artifact', file_path: 'C:/proj/report.html' })
 
   for (const surface of ['terminal', 'desktop'] as const) {
@@ -79,6 +79,7 @@ test('renamed or new usage windows still land in the right bars', async ($, on) 
 })
 
 const idleBand = { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120, scroll: { offset: 0, bodyRows: 10 }, view: {} }
+const workingBand = { ...idleBand, isWorking: true }
 
 test('the bars keep round caps with room for them at both ends', async ($, on) => {
   const now = Date.parse('2026-11-01T12:00:00Z')
@@ -120,12 +121,59 @@ test('compact and clear sit on the second row only, and run their commands', asy
   expect(await empty.find({ type: 'Button' })).toBeUndefined()
   await empty.unmount()
 
-  await $.tool.call({ tool: 'Read', file_path: 'C:/proj/notes.md' })
+  await $.tool.call({ tool: 'Write', file_path: 'C:/proj/notes.md', content: 'x' })
   for (const surface of ['terminal', 'desktop'] as const) {
-    const ui = await $.ui.mount({ plugin: 'session-band', component: 'AbovePrompt', surface, props: idleBand })
+    const ui = await $.ui.mount({ plugin: 'session-band', component: 'AbovePrompt', surface, props: workingBand })
     await ui.press({ key: 'compact' })
     await ui.press({ key: 'clear' })
     await ui.unmount()
   }
   expect(ran).toEqual(['compact', 'clear', 'compact', 'clear'])
+})
+
+test('each side of the second line has a placeholder when it is empty', async ($, on) => {
+  const now = Date.parse('2026-11-01T12:00:00Z')
+  on('clock.now', () => ({ value: now }))
+  on('clock.every', () => ({ value: undefined }))
+  on('session.usage', () => ({
+    value: { startedAt: now, context: { tokens: 50_000, window: 1_000_000, percent: 5 }, rateLimits: [] },
+  }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('tool.call', (_, e) =>
+    e.tool === 'Artifact'
+      ? { result: { url: 'https://claude.ai/code/artifact/abc', path: 'x', title: 'Report' } }
+      : { result: {} },
+  )
+  const mount = (props: typeof idleBand) =>
+    $.ui.mount({ plugin: 'session-band', component: 'AbovePrompt', surface: 'desktop', props })
+  const text = async (ui: Awaited<ReturnType<typeof mount>>, words: RegExp) =>
+    (await ui.find({ type: 'Text', text: words }))?.text
+
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+
+  // A file only read is not being edited: no second line.
+  await $.tool.call({ tool: 'Read', file_path: 'C:/proj/readme.md' })
+  let ui = await mount(workingBand)
+  expect(await ui.find({ type: 'Button' })).toBeUndefined()
+  await ui.unmount()
+
+  // Editing with no artifacts: "No Artifacts" on the left.
+  await $.tool.call({ tool: 'Edit', file_path: 'C:/proj/app.ts', old_string: 'a', new_string: 'b' })
+  ui = await mount(workingBand)
+  expect(await text(ui, /^No Artifacts$/)).toBe('No Artifacts')
+  expect(await text(ui, /No Active Files/)).toBeUndefined()
+  await ui.unmount()
+
+  // The turn over, nothing is being edited: no second line.
+  ui = await mount(idleBand)
+  expect(await ui.find({ type: 'Button' })).toBeUndefined()
+  await ui.unmount()
+
+  // An artifact and nothing being edited: "No Active Files" on the right.
+  await $.tool.call({ tool: 'Artifact', file_path: 'C:/proj/report.html' })
+  ui = await mount(idleBand)
+  expect(await text(ui, /^No Active Files$/)).toBe('No Active Files')
+  expect(await text(ui, /^No Artifacts$/)).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'clear' })).toBeDefined()
+  await ui.unmount()
 })

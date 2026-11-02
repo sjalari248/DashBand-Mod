@@ -19,7 +19,8 @@ const BAR_INSET = 5
 // The widest the meters run, in cells; past it the band pads both sides equally.
 const MAX_COLUMNS = 150
 const MAX_FILES = 3
-const FILE_TOOLS = new Set(['Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
+// The tools that change a file: only files Claude is editing are shown.
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 
 const basename = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path
 
@@ -107,15 +108,19 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  on('turn.complete', ($, e, next) => {
+  // The main conversation's turn ending ends the editing; a subagent's does not.
+  on('turn.complete', async ($, e, next) => {
+    if (!e.agentId) {
+      await update($, files, () => [])
+    }
     $.ui.invalidate('ui.render')
     return next(e)
-  })
+  }).catch(($, e, next) => next(e))
 
   on('tool.call', async ($, e, next) => {
     const args = e as unknown as Record<string, unknown>
 
-    if (FILE_TOOLS.has(e.tool)) {
+    if (EDIT_TOOLS.has(e.tool)) {
       const path = args.file_path ?? args.notebook_path
       if (typeof path === 'string' && path) {
         const name = basename(path)
@@ -197,8 +202,12 @@ export const register: Register = on => {
     const weeklyReset = countdown(weekly?.resetsAt, now)
     const ctxDetail = ctx.tokens !== undefined ? `${tokens(ctx.tokens)}/${tokens(ctx.window)}` : undefined
 
-    const hasExtras = made.length > 0 || touched.length > 0
-    const names = touched.map(n => clipMiddle(n, 32))
+    // Files count only while a turn is editing them; the second line shows
+    // only when there are artifacts or such files, with a placeholder on
+    // whichever side has nothing.
+    const editing = e.props.isWorking ? touched : []
+    const hasExtras = made.length > 0 || editing.length > 0
+    const names = editing.map(n => clipMiddle(n, 32))
 
     // Both run the engine's own command, as typing it would: /compact queues
     // until the session is idle, /clear starts the conversation over.
@@ -226,11 +235,9 @@ export const register: Register = on => {
         {hasExtras ? (
           <Box flexDirection="row" alignItems="center" columnGap="lg" overflow="hidden">
             <Box flexShrink={1} minWidth={0} flexDirection="row" alignItems="center" gap="xs" overflow="hidden">
-              {made.length > 0 ? (
-                <Text size="caption" dimColor>
-                  Artifacts
-                </Text>
-              ) : null}
+              <Text size="caption" dimColor>
+                {made.length > 0 ? 'Artifacts' : 'No Artifacts'}
+              </Text>
               {made.map(a =>
                 Link ? (
                   <Link key={a.url} href={a.url} label={`◆ ${clip(a.title, 22)}`} />
@@ -247,13 +254,17 @@ export const register: Register = on => {
             <Box flexShrink={1} minWidth={0} flexDirection="row" justifyContent="flex-end" alignItems="center" overflow="hidden">
               {names.length > 0 ? (
                 Client ? (
-                  <Client key="files" module="./shimmer.tsx" props={{ names, active: e.props.isWorking }} />
+                  <Client key="files" module="./shimmer.tsx" props={{ names, active: true }} />
                 ) : (
                   <Text size="caption" dimColor wrap="truncate-start">
                     {names.join('  ')}
                   </Text>
                 )
-              ) : null}
+              ) : (
+                <Text size="caption" dimColor>
+                  No Active Files
+                </Text>
+              )}
             </Box>
 
             <Box flexShrink={0} flexDirection="row" alignItems="center" gap="xs">
